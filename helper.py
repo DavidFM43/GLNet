@@ -17,7 +17,7 @@ from PIL import Image
 # torch.cuda.synchronize()
 # torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
-
+device = "cuda" if torch.cuda.is_available() else "cpu"
 transformer = transforms.Compose(
     [
         transforms.ToTensor(),
@@ -57,7 +57,7 @@ def masks_transform(masks, numpy=False):
     if numpy:
         return targets
     else:
-        return torch.from_numpy(targets).long().cuda()
+        return torch.from_numpy(targets).long().to(device)
 
 
 def images_transform(images):
@@ -67,7 +67,7 @@ def images_transform(images):
     inputs = []
     for img in images:
         inputs.append(transformer(img))
-    inputs = torch.stack(inputs, dim=0).cuda()
+    inputs = torch.stack(inputs, dim=0).to(device)
     return inputs
 
 
@@ -130,7 +130,7 @@ def global2patch(images, p_size):
                 patches[i][x * n_y + y] = transforms.functional.crop(
                     images[i], top, left, p_size[0], p_size[1]
                 )
-        templates.append(Variable(torch.Tensor(template).expand(1, 1, -1, -1)).cuda())
+        templates.append(Variable(torch.Tensor(template).expand(1, 1, -1, -1)).to(device))
     return patches, coordinates, templates, sizes, ratios
 
 
@@ -166,7 +166,7 @@ def template_patch2global(size_g, size_p, n, step):
             y += step
         x += step
         y = 0
-    return Variable(torch.Tensor(template).expand(1, 1, -1, -1)).cuda(), coordinates
+    return Variable(torch.Tensor(template).expand(1, 1, -1, -1)).to(device), coordinates
 
 
 def one_hot_gaussian_blur(index, classes):
@@ -202,12 +202,12 @@ def create_model_load_weights(
     n_class, mode=1, evaluation=False, path_g=None, path_g2l=None, path_l2g=None
 ):
     model = fpn(n_class)
-    model = nn.DataParallel(model)
-    model = model.cuda()
+    # model = nn.DataParallel(model)
+    model = model.to(device)
 
     if (mode == 2 and not evaluation) or (mode == 1 and evaluation):
         # load fixed basic global branch
-        partial = torch.load(path_g)
+        partial = torch.load(path_g, map_location=device)
         state = model.state_dict()
         # 1. filter out unnecessary keys
         pretrained_dict = {
@@ -219,7 +219,7 @@ def create_model_load_weights(
         model.load_state_dict(state)
 
     if (mode == 3 and not evaluation) or (mode == 2 and evaluation):
-        partial = torch.load(path_g2l)
+        partial = torch.load(path_g2l, map_location=device)
         state = model.state_dict()
         # 1. filter out unnecessary keys
         pretrained_dict = {
@@ -234,9 +234,9 @@ def create_model_load_weights(
     if mode == 3:
         # load fixed basic global branch
         global_fixed = fpn(n_class)
-        global_fixed = nn.DataParallel(global_fixed)
-        global_fixed = global_fixed.cuda()
-        partial = torch.load(path_g)
+        # global_fixed = nn.DataParallel(global_fixed)
+        global_fixed = global_fixed.to(device)
+        partial = torch.load(path_g, map_location=device)
         state = global_fixed.state_dict()
         # 1. filter out unnecessary keys
         pretrained_dict = {
@@ -249,7 +249,7 @@ def create_model_load_weights(
         global_fixed.eval()
 
     if mode == 3 and evaluation:
-        partial = torch.load(path_l2g)
+        partial = torch.load(path_l2g, map_location=device)
         state = model.state_dict()
         # 1. filter out unnecessary keys
         pretrained_dict = {
@@ -261,11 +261,11 @@ def create_model_load_weights(
         model.load_state_dict(state)
 
     if mode == 1 or mode == 3:
-        model.module.resnet_local.eval()
-        model.module.fpn_local.eval()
+        model.resnet_local.eval()
+        model.fpn_local.eval()
     else:
-        model.module.resnet_global.eval()
-        model.module.fpn_global.eval()
+        model.resnet_global.eval()
+        model.fpn_global.eval()
 
     return model, global_fixed
 
@@ -276,14 +276,14 @@ def get_optimizer(model, mode=1, learning_rate=2e-5):
         optimizer = torch.optim.Adam(
             [
                 {
-                    "params": model.module.resnet_global.parameters(),
+                    "params": model.resnet_global.parameters(),
                     "lr": learning_rate,
                 },
-                {"params": model.module.resnet_local.parameters(), "lr": 0},
-                {"params": model.module.fpn_global.parameters(), "lr": learning_rate},
-                {"params": model.module.fpn_local.parameters(), "lr": 0},
+                {"params": model.resnet_local.parameters(), "lr": 0},
+                {"params": model.fpn_global.parameters(), "lr": learning_rate},
+                {"params": model.fpn_local.parameters(), "lr": 0},
                 {
-                    "params": model.module.ensemble_conv.parameters(),
+                    "params": model.ensemble_conv.parameters(),
                     "lr": learning_rate,
                 },
             ],
@@ -293,12 +293,12 @@ def get_optimizer(model, mode=1, learning_rate=2e-5):
         # train local
         optimizer = torch.optim.Adam(
             [
-                {"params": model.module.resnet_global.parameters(), "lr": 0},
-                {"params": model.module.resnet_local.parameters(), "lr": learning_rate},
-                {"params": model.module.fpn_global.parameters(), "lr": 0},
-                {"params": model.module.fpn_local.parameters(), "lr": learning_rate},
+                {"params": model.resnet_global.parameters(), "lr": 0},
+                {"params": model.resnet_local.parameters(), "lr": learning_rate},
+                {"params": model.fpn_global.parameters(), "lr": 0},
+                {"params": model.fpn_local.parameters(), "lr": learning_rate},
                 {
-                    "params": model.module.ensemble_conv.parameters(),
+                    "params": model.ensemble_conv.parameters(),
                     "lr": learning_rate,
                 },
             ],
@@ -332,13 +332,13 @@ class Trainer(object):
         self.lamb_fmreg = lamb_fmreg
 
     def set_train(self, model):
-        model.module.ensemble_conv.train()
+        model.ensemble_conv.train()
         if self.mode == 1 or self.mode == 3:
-            model.module.resnet_global.train()
-            model.module.fpn_global.train()
+            model.resnet_global.train()
+            model.fpn_global.train()
         else:
-            model.module.resnet_local.train()
-            model.module.fpn_local.train()
+            model.resnet_local.train()
+            model.fpn_local.train()
 
     def get_scores(self):
         score_train = self.metrics.get_scores()
@@ -459,7 +459,7 @@ class Trainer(object):
                     patches_var = images_transform(
                         patches[i][j : j + self.sub_batch_size]
                     )  # b, c, h, w
-                    fm_patches, output_patches = model.module.collect_local_fm(
+                    fm_patches, output_patches = model.collect_local_fm(
                         images_glb[i : i + 1],
                         patches_var,
                         ratios[i],
@@ -494,14 +494,14 @@ class Trainer(object):
                             label=True,
                         )
                     )
-                    fl = fm_patches[i][j : j + self.sub_batch_size].cuda()
-                    fg = model.module._crop_global(
+                    fl = fm_patches[i][j : j + self.sub_batch_size].to(device)
+                    fg = model._crop_global(
                         fm_global[i : i + 1],
                         coordinates[i][j : j + self.sub_batch_size],
                         ratios[i],
                     )[0]
                     fg = F.interpolate(fg, size=fl.size()[2:], mode="bilinear")
-                    output_ensembles = model.module.ensemble(fl, fg)
+                    output_ensembles = model.ensemble(fl, fg)
                     loss = self.criterion(
                         output_ensembles, label_patches_var
                     )  # + 0.15 * mse(fl, fg)
@@ -821,7 +821,7 @@ class Evaluator(object):
                                 (
                                     fm_patches,
                                     output_patches,
-                                ) = model.module.collect_local_fm(
+                                ) = model.collect_local_fm(
                                     images_glb[i : i + 1],
                                     patches_var,
                                     ratios[i],
@@ -859,8 +859,8 @@ class Evaluator(object):
                         for i in range(len(images)):
                             j = 0
                             while j < len(coordinates[i]):
-                                fl = fm_patches[i][j : j + self.sub_batch_size].cuda()
-                                fg = model.module._crop_global(
+                                fl = fm_patches[i][j : j + self.sub_batch_size].to(device)
+                                fg = model._crop_global(
                                     fm_global[i : i + 1],
                                     coordinates[i][j : j + self.sub_batch_size],
                                     ratios[i],
@@ -868,7 +868,7 @@ class Evaluator(object):
                                 fg = F.interpolate(
                                     fg, size=fl.size()[2:], mode="bilinear"
                                 )
-                                output_ensembles = model.module.ensemble(
+                                output_ensembles = model.ensemble(
                                     fl, fg
                                 )  # include cordinates
 
