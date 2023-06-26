@@ -30,15 +30,7 @@ if __name__ == "__main__":
     images_dir = raw_data_dir / "images"
     masks_dir = raw_data_dir / "raw_masks"  # masks are in rgb format
 
-    # read ids
-    with open("train.txt") as f:
-        train_ids = [x.split("_")[0] for x in f.read().splitlines()]
-    with open("crossvali.txt") as f:
-        val_ids = [x.split("_")[0] for x in f.read().splitlines()]
-    with open("test.txt") as f:
-        test_ids = [x.split("_")[0] for x in f.read().splitlines()]
-
-    # move data
-    move_data(train_ids, "train", images_dir=images_dir, masks_dir=masks_dir)
-    move_data(val_ids, "val", images_dir=images_dir, masks_dir=masks_dir)
-    move_data(test_ids, "test", images_dir=images_dir, masks_dir=masks_dir)
+    for split_name in ["train", "crossvali", "test"]:
+        with open(f"{split_name}.txt") as f:
+            ids = [x.split("_")[0] for x in f.read().splitlines()]
+        move_data(ids, split_name, images_dir=images_dir, masks_dir=masks_dir)

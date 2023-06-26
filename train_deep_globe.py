@@ -13,35 +13,35 @@ from dataset.deep_globe import DeepGlobe, classToRGB, is_image_file
 from utils.loss import CrossEntropyLoss2d, SoftCrossEntropyLoss2d, FocalLoss
 from utils.lovasz_losses import lovasz_softmax
 from utils.lr_scheduler import LR_Scheduler
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 from helper import create_model_load_weights, get_optimizer, Trainer, Evaluator, collate, collate_test
 from option import Options
 
-args = Options().parse()
-n_class = args.n_class
+n_class = 7
 
 # torch.cuda.synchronize()
 # torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
-data_path = args.data_path
-model_path = args.model_path
+data_path = "data"
+model_path = "saved_models"
+log_path = "runs"
+
 if not os.path.isdir(model_path): os.mkdir(model_path)
-log_path = args.log_path
 if not os.path.isdir(log_path): os.mkdir(log_path)
-task_name = args.task_name
+task_name = "train"
 
 print(task_name)
 ###################################
 
-mode = args.mode # 1: train global; 2: train local from global; 3: train global from local
-evaluation = args.evaluation
+mode = 1 # 1: train global; 2: train local from global; 3: train global from local
+evaluation = False
 test = evaluation and False
 print("mode:", mode, "evaluation:", evaluation, "test:", test)
 
 ###################################
 print("preparing datasets and dataloaders......")
-batch_size = args.batch_size
+batch_size = 6
 ids_train = [image_name for image_name in os.listdir(os.path.join(data_path, "train", "Sat")) if is_image_file(image_name)]
 ids_val = [image_name for image_name in os.listdir(os.path.join(data_path, "crossvali", "Sat")) if is_image_file(image_name)]
 ids_test = [image_name for image_name in os.listdir(os.path.join(data_path, "offical_crossvali", "Sat")) if is_image_file(image_name)]
@@ -56,21 +56,25 @@ dataloader_test = torch.utils.data.DataLoader(dataset=dataset_test, batch_size=b
 
 ##### sizes are (w, h) ##############################
 # make sure margin / 32 is over 1.5 AND size_g is divisible by 4
-size_g = (args.size_g, args.size_g) # resized global image
-size_p = (args.size_p, args.size_p) # cropped local patch size
-sub_batch_size = args.sub_batch_size # batch size for train local patches
+size_g = (508, 508) # resized global image
+size_p = (508, 508) # cropped local patch size
+sub_batch_size = 6 # batch size for train local patches
 ###################################
 print("creating models......")
 
-path_g = os.path.join(model_path, args.path_g)
-path_g2l = os.path.join(model_path, args.path_g2l)
-path_l2g = os.path.join(model_path, args.path_l2g)
+path_g = os.path.join(model_path, "")
+path_g2l = os.path.join(model_path, "")
+path_l2g = os.path.join(model_path, "")
 model, global_fixed = create_model_load_weights(n_class, mode, evaluation, path_g=path_g, path_g2l=path_g2l, path_l2g=path_l2g)
 
 ###################################
-num_epochs = args.num_epochs
-learning_rate = args.lr
-lamb_fmreg = args.lamb_fmreg
+if mode == 1 or mode == 3:
+    num_epochs = 120
+    learning_rate = 5e-5
+else:
+    num_epochs = 50
+    learning_rate = 2e-5
+lamb_fmreg = 0.15
 
 optimizer = get_optimizer(model, mode, learning_rate=learning_rate)
 
