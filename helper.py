@@ -962,19 +962,19 @@ class Evaluator(object):
                 .numpy()[0]
                 for i in range(len(images))
             ]
-            if not self.test:
-                self.metrics_global.update(labels_npy, predictions_global)
+            # if not self.test:
+            #     self.metrics_global.update(labels_npy, predictions_global)
 
             if self.mode == 2 or self.mode == 3:
                 # patch predictions ###########################
                 predictions_local = [score.argmax(1)[0] for score in scores_local]
-                if not self.test:
-                    self.metrics_local.update(labels_npy, predictions_local)
+                # if not self.test:
+                #     self.metrics_local.update(labels_npy, predictions_local)
                 ###################################################
                 # combined/ensemble predictions ###########################
                 predictions = [score.argmax(1)[0] for score in scores]
-                if not self.test:
-                    self.metrics.update(labels_npy, predictions)
+                # if not self.test:
+                #     self.metrics.update(labels_npy, predictions)
                 return predictions, predictions_global, predictions_local
             else:
                 return None, predictions_global, None
