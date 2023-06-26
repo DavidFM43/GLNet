@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch
 import numpy as np
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class fpn_module_global(nn.Module):
     def __init__(self, numClass):
@@ -331,7 +332,7 @@ class fpn(nn.Module):
         b, _, _, _ = f_local.size()
         _, c, H, W = f_global.size() # match global feature size
         if merge is None:
-            merge = torch.zeros((1, c, H, W)).cuda()
+            merge = torch.zeros((1, c, H, W)).to(device)
         h, w = int(np.round(H * ratio[0])), int(np.round(W * ratio[1]))
         for i in range(b):
             index = oped[0] + i
@@ -355,8 +356,8 @@ class fpn(nn.Module):
         '''
         with torch.no_grad():
             if self.patch_n == 0:
-                self.c2_g, self.c3_g, self.c4_g, self.c5_g = global_model.module.resnet_global.forward(image_global)
-                self.output_g, self.ps0_g, self.ps1_g, self.ps2_g, self.ps3_g = global_model.module.fpn_global.forward(self.c2_g, self.c3_g, self.c4_g, self.c5_g)
+                self.c2_g, self.c3_g, self.c4_g, self.c5_g = global_model.resnet_global.forward(image_global)
+                self.output_g, self.ps0_g, self.ps1_g, self.ps2_g, self.ps3_g = global_model.fpn_global.forward(self.c2_g, self.c3_g, self.c4_g, self.c5_g)
                 # self.output_g = F.interpolate(self.output_g, image_global.size()[2:], mode='nearest')
             self.patch_n += patches.size()[0]
             self.patch_n %= n_patch_all
