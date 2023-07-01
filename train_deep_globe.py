@@ -31,9 +31,9 @@ n_class = 7
 # torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
-data_path = "data"
-model_path = "saved_models"
-log_path = "runs"
+data_path = "/home/azureuser/cloudfiles/code/Users/davidfelipemr/GLNet/data"
+model_path = "/home/azureuser/cloudfiles/code/Users/davidfelipemr/GLNet/saved_models"
+log_path = "/home/azureuser/cloudfiles/code/Users/davidfelipemr/GLNet/runs"
 
 if not os.path.isdir(model_path):
     os.mkdir(model_path)
@@ -44,34 +44,26 @@ task_name = "train"
 print(task_name)
 ###################################
 
-mode = 1  # 1: train global; 2: train local from global; 3: train global from local
-evaluation = False
+mode = 3  # 1: train global; 2: train local from global; 3: train global from local
+evaluation = True
 test = evaluation and False
 print("mode:", mode, "evaluation:", evaluation, "test:", test)
 
 ###################################
 print("preparing datasets and dataloaders......")
-batch_size = 6
+batch_size = 2
 ids_train = [
-    image_name
-    for image_name in os.listdir(os.path.join(data_path, "train", "Sat"))
-    if is_image_file(image_name)
+    image_name for image_name in os.listdir(os.path.join(data_path, "train", "Sat")) if is_image_file(image_name)
 ]
 ids_val = [
-    image_name
-    for image_name in os.listdir(os.path.join(data_path, "crossvali", "Sat"))
-    if is_image_file(image_name)
+    image_name for image_name in os.listdir(os.path.join(data_path, "crossvali", "Sat")) if is_image_file(image_name)
 ]
 ids_test = [
-    image_name
-    for image_name in os.listdir(os.path.join(data_path, "offical_crossvali", "Sat"))
-    if is_image_file(image_name)
+    image_name for image_name in os.listdir(os.path.join(data_path, "test", "Sat")) if is_image_file(image_name)
 ]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-dataset_train = DeepGlobe(
-    os.path.join(data_path, "train"), ids_train, label=True, transform=True
-)
+dataset_train = DeepGlobe(os.path.join(data_path, "train"), ids_train, label=True, transform=True)
 dataloader_train = torch.utils.data.DataLoader(
     dataset=dataset_train,
     batch_size=batch_size,
@@ -103,13 +95,13 @@ dataloader_test = torch.utils.data.DataLoader(
 # make sure margin / 32 is over 1.5 AND size_g is divisible by 4
 size_g = (508, 508)  # resized global image
 size_p = (508, 508)  # cropped local patch size
-sub_batch_size = 6  # batch size for train local patches
+sub_batch_size = 2  # batch size for train local patches
 ###################################
 print("creating models......")
 
-path_g = os.path.join(model_path, "")
-path_g2l = os.path.join(model_path, "")
-path_l2g = os.path.join(model_path, "")
+path_g = os.path.join(model_path, "fpn_deepglobe_global.pth")
+path_g2l = os.path.join(model_path, "fpn_deepglobe_global2local.pth")
+path_l2g = os.path.join(model_path, "fpn_deepglobe_local2global.pth")
 model, global_fixed = create_model_load_weights(
     n_class, mode, evaluation, path_g=path_g, path_g2l=path_g2l, path_l2g=path_l2g
 )
@@ -135,13 +127,11 @@ criterion = lambda x, y: criterion1(x, y)
 # criterion = lambda x,y: 0.5*criterion1(x, y) + 0.5*criterion3(x, y)
 mse = nn.MSELoss()
 
-if not evaluation:
-    writer = SummaryWriter(log_dir=log_path + task_name)
-    f_log = open(log_path + task_name + ".log", "w")
+# if not evaluation:
+#     writer = SummaryWriter(log_dir=log_path + task_name)
+#     f_log = open(log_path + task_name + ".log", "w")
 
-trainer = Trainer(
-    criterion, optimizer, n_class, size_g, size_p, sub_batch_size, mode, lamb_fmreg
-)
+trainer = Trainer(criterion, optimizer, n_class, size_g, size_p, sub_batch_size, mode, lamb_fmreg)
 evaluator = Evaluator(n_class, size_g, size_p, sub_batch_size, mode, test)
 
 best_pred = 0.0
@@ -198,15 +188,9 @@ for epoch in range(num_epochs):
                 score_val, score_val_global, score_val_local = evaluator.get_scores()
                 # use [1:] since class0 is not considered in deep_globe metric
                 if mode == 1:
-                    tbar.set_description(
-                        "global mIoU: %.3f"
-                        % (np.mean(np.nan_to_num(score_val_global["iou"])[1:]))
-                    )
+                    tbar.set_description("global mIoU: %.3f" % (np.mean(np.nan_to_num(score_val_global["iou"])[1:])))
                 else:
-                    tbar.set_description(
-                        "agg mIoU: %.3f"
-                        % (np.mean(np.nan_to_num(score_val["iou"])[1:]))
-                    )
+                    tbar.set_description("agg mIoU: %.3f" % (np.mean(np.nan_to_num(score_val["iou"])[1:])))
                 images = sample_batched["image"]
                 if not test:
                     labels = sample_batched["label"]  # PIL images
@@ -216,75 +200,45 @@ for epoch in range(num_epochs):
                         os.mkdir("./prediction/")
                     for i in range(len(images)):
                         if mode == 1:
-                            transforms.functional.to_pil_image(
-                                classToRGB(predictions_global[i]) * 255.0
-                            ).save(
+                            transforms.functional.to_pil_image(classToRGB(predictions_global[i]) * 255.0).save(
                                 "./prediction/" + sample_batched["id"][i] + "_mask.png"
                             )
                         else:
-                            transforms.functional.to_pil_image(
-                                classToRGB(predictions[i]) * 255.0
-                            ).save(
+                            transforms.functional.to_pil_image(classToRGB(predictions[i]) * 255.0).save(
                                 "./prediction/" + sample_batched["id"][i] + "_mask.png"
                             )
 
                 if not evaluation and not test:
-                    if i_batch * batch_size + len(images) > (
+                    if i_batch * batch_size + len(images) > (epoch % len(dataloader_val)) and i_batch * batch_size <= (
                         epoch % len(dataloader_val)
-                    ) and i_batch * batch_size <= (epoch % len(dataloader_val)):
+                    ):
                         writer.add_image(
                             "image",
-                            transforms.ToTensor()(
-                                images[
-                                    (epoch % len(dataloader_val)) - i_batch * batch_size
-                                ]
-                            ),
+                            transforms.ToTensor()(images[(epoch % len(dataloader_val)) - i_batch * batch_size]),
                             epoch,
                         )
                         if not test:
                             writer.add_image(
                                 "mask",
-                                classToRGB(
-                                    np.array(
-                                        labels[
-                                            (epoch % len(dataloader_val))
-                                            - i_batch * batch_size
-                                        ]
-                                    )
-                                )
+                                classToRGB(np.array(labels[(epoch % len(dataloader_val)) - i_batch * batch_size]))
                                 * 255.0,
                                 epoch,
                             )
                         if mode == 2 or mode == 3:
                             writer.add_image(
                                 "prediction",
-                                classToRGB(
-                                    predictions[
-                                        (epoch % len(dataloader_val))
-                                        - i_batch * batch_size
-                                    ]
-                                )
-                                * 255.0,
+                                classToRGB(predictions[(epoch % len(dataloader_val)) - i_batch * batch_size]) * 255.0,
                                 epoch,
                             )
                             writer.add_image(
                                 "prediction_local",
-                                classToRGB(
-                                    predictions_local[
-                                        (epoch % len(dataloader_val))
-                                        - i_batch * batch_size
-                                    ]
-                                )
+                                classToRGB(predictions_local[(epoch % len(dataloader_val)) - i_batch * batch_size])
                                 * 255.0,
                                 epoch,
                             )
                         writer.add_image(
                             "prediction_global",
-                            classToRGB(
-                                predictions_global[
-                                    (epoch % len(dataloader_val)) - i_batch * batch_size
-                                ]
-                            )
+                            classToRGB(predictions_global[(epoch % len(dataloader_val)) - i_batch * batch_size])
                             * 255.0,
                             epoch,
                         )
@@ -354,12 +308,8 @@ for epoch in range(num_epochs):
                     writer.add_scalars(
                         "IoU",
                         {
-                            "train iou": np.mean(
-                                np.nan_to_num(score_train_global["iou"][1:])
-                            ),
-                            "validation iou": np.mean(
-                                np.nan_to_num(score_val_global["iou"][1:])
-                            ),
+                            "train iou": np.mean(np.nan_to_num(score_train_global["iou"][1:])),
+                            "validation iou": np.mean(np.nan_to_num(score_val_global["iou"][1:])),
                         },
                         epoch,
                     )
@@ -368,9 +318,7 @@ for epoch in range(num_epochs):
                         "IoU",
                         {
                             "train iou": np.mean(np.nan_to_num(score_train["iou"][1:])),
-                            "validation iou": np.mean(
-                                np.nan_to_num(score_val["iou"][1:])
-                            ),
+                            "validation iou": np.mean(np.nan_to_num(score_val["iou"][1:])),
                         },
                         epoch,
                     )

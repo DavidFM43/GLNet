@@ -62,7 +62,7 @@ def masks_transform(masks, numpy=False):
 
 def images_transform(images):
     """
-    images: list of PIL images
+    Transforms a list of PIL images to a torch tensor
     """
     inputs = []
     for img in images:
@@ -73,6 +73,8 @@ def images_transform(images):
 
 def get_patch_info(shape, p_size):
     """
+
+
     shape: origin image size, (x, y)
     p_size: patch size (square)
     return: n_x, n_y, step_x, step_y
@@ -80,10 +82,12 @@ def get_patch_info(shape, p_size):
     x = shape[0]
     y = shape[1]
     n = m = 1
+    # number of patches in vertical direction
     while x > n * p_size:
         n += 1
     while p_size - 1.0 * (x - p_size) / (n - 1) < 50:
         n += 1
+    # number of patches in horizontal direction
     while y > m * p_size:
         m += 1
     while p_size - 1.0 * (y - p_size) / (m - 1) < 50:
@@ -94,6 +98,8 @@ def get_patch_info(shape, p_size):
 def global2patch(images, p_size):
     """
     image/label => patches
+
+    images: list of PIL images
     p_size: patch size
     return: list of PIL patch images; coordinates: images->patches; ratios: (h, w)
     """
@@ -103,34 +109,46 @@ def global2patch(images, p_size):
     sizes = []
     ratios = [(0, 0)] * len(images)
     patch_ones = np.ones(p_size)
+
+    # loop over the batch of images
     for i in range(len(images)):
         w, h = images[i].size
         size = (h, w)
         sizes.append(size)
         ratios[i] = (float(p_size[0]) / size[0], float(p_size[1]) / size[1])
         template = np.zeros(size)
+        # batch info
         n_x, n_y, step_x, step_y = get_patch_info(size, p_size[0])
         patches.append([images[i]] * (n_x * n_y))
+        # coordinates of the top left corner of each patch
         coordinates.append([(0, 0)] * (n_x * n_y))
+
         for x in range(n_x):
+            # top side of patch
             if x < n_x - 1:
                 top = int(np.round(x * step_x))
             else:
                 top = size[0] - p_size[0]
+
             for y in range(n_y):
+                # left side of patch
                 if y < n_y - 1:
                     left = int(np.round(y * step_y))
                 else:
                     left = size[1] - p_size[1]
+
                 template[top : top + p_size[0], left : left + p_size[1]] += patch_ones
+
                 coordinates[i][x * n_y + y] = (
                     1.0 * top / size[0],
                     1.0 * left / size[1],
                 )
-                patches[i][x * n_y + y] = transforms.functional.crop(
-                    images[i], top, left, p_size[0], p_size[1]
-                )
+
+                # actual patch
+                patches[i][x * n_y + y] = transforms.functional.crop(images[i], top, left, p_size[0], p_size[1])
+
         templates.append(Variable(torch.Tensor(template).expand(1, 1, -1, -1)).to(device))
+
     return patches, coordinates, templates, sizes, ratios
 
 
@@ -145,9 +163,7 @@ def patch2global(patches, n_class, sizes, coordinates, p_size):
             top, left = coordinates[i][j]
             top = int(np.round(top * sizes[i][0]))
             left = int(np.round(left * sizes[i][1]))
-            predictions[i][
-                :, top : top + p_size[0], left : left + p_size[1]
-            ] += patches[i][j]
+            predictions[i][:, top : top + p_size[0], left : left + p_size[1]] += patches[i][j]
     return predictions
 
 
@@ -174,9 +190,7 @@ def one_hot_gaussian_blur(index, classes):
     index: numpy array b, h, w
     classes: int
     """
-    mask = np.transpose(
-        (np.arange(classes) == index[..., None]).astype(float), (0, 3, 1, 2)
-    )
+    mask = np.transpose((np.arange(classes) == index[..., None]).astype(float), (0, 3, 1, 2))
     b, c, _, _ = mask.shape
     for i in range(b):
         for j in range(c):
@@ -198,9 +212,7 @@ def collate_test(batch):
     return {"image": image, "id": id}
 
 
-def create_model_load_weights(
-    n_class, mode=1, evaluation=False, path_g=None, path_g2l=None, path_l2g=None
-):
+def create_model_load_weights(n_class, mode=1, evaluation=False, path_g=None, path_g2l=None, path_l2g=None):
     model = fpn(n_class)
     # model = nn.DataParallel(model)
     model = model.to(device)
@@ -210,9 +222,7 @@ def create_model_load_weights(
         partial = torch.load(path_g, map_location=device)
         state = model.state_dict()
         # 1. filter out unnecessary keys
-        pretrained_dict = {
-            k: v for k, v in partial.items() if k in state and "local" not in k
-        }
+        pretrained_dict = {k: v for k, v in partial.items() if k in state and "local" not in k}
         # 2. overwrite entries in the existing state dict
         state.update(pretrained_dict)
         # 3. load the new state dict
@@ -222,9 +232,7 @@ def create_model_load_weights(
         partial = torch.load(path_g2l, map_location=device)
         state = model.state_dict()
         # 1. filter out unnecessary keys
-        pretrained_dict = {
-            k: v for k, v in partial.items() if k in state
-        }  # and "global" not in k}
+        pretrained_dict = {k: v for k, v in partial.items() if k in state}  # and "global" not in k}
         # 2. overwrite entries in the existing state dict
         state.update(pretrained_dict)
         # 3. load the new state dict
@@ -239,9 +247,7 @@ def create_model_load_weights(
         partial = torch.load(path_g, map_location=device)
         state = global_fixed.state_dict()
         # 1. filter out unnecessary keys
-        pretrained_dict = {
-            k: v for k, v in partial.items() if k in state and "local" not in k
-        }
+        pretrained_dict = {k: v for k, v in partial.items() if k in state and "local" not in k}
         # 2. overwrite entries in the existing state dict
         state.update(pretrained_dict)
         # 3. load the new state dict
@@ -252,9 +258,7 @@ def create_model_load_weights(
         partial = torch.load(path_l2g, map_location=device)
         state = model.state_dict()
         # 1. filter out unnecessary keys
-        pretrained_dict = {
-            k: v for k, v in partial.items() if k in state
-        }  # and "global" not in k}
+        pretrained_dict = {k: v for k, v in partial.items() if k in state}  # and "global" not in k}
         # 2. overwrite entries in the existing state dict
         state.update(pretrained_dict)
         # 3. load the new state dict
@@ -353,32 +357,22 @@ class Trainer(object):
 
     def train(self, sample, model, global_fixed):
         images, labels = sample["image"], sample["label"]  # PIL images
-        labels_npy = masks_transform(
-            labels, numpy=True
-        )  # label of origin size in numpy
+        labels_npy = masks_transform(labels, numpy=True)  # label of origin size in numpy
 
         images_glb = resize(images, self.size_g)  # list of resized PIL images
         images_glb = images_transform(images_glb)
-        labels_glb = resize(
-            labels, (self.size_g[0] // 4, self.size_g[1] // 4), label=True
-        )  # FPN down 1/4, for loss
+        labels_glb = resize(labels, (self.size_g[0] // 4, self.size_g[1] // 4), label=True)  # FPN down 1/4, for loss
         labels_glb = masks_transform(labels_glb)
 
         if self.mode == 2 or self.mode == 3:
-            patches, coordinates, templates, sizes, ratios = global2patch(
-                images, self.size_p
-            )
+            patches, coordinates, templates, sizes, ratios = global2patch(images, self.size_p)
             label_patches, _, _, _, _ = global2patch(labels, self.size_p)
             predicted_patches = [
-                np.zeros(
-                    (len(coordinates[i]), self.n_class, self.size_p[0], self.size_p[1])
-                )
+                np.zeros((len(coordinates[i]), self.n_class, self.size_p[0], self.size_p[1]))
                 for i in range(len(images))
             ]
             predicted_ensembles = [
-                np.zeros(
-                    (len(coordinates[i]), self.n_class, self.size_p[0], self.size_p[1])
-                )
+                np.zeros((len(coordinates[i]), self.n_class, self.size_p[0], self.size_p[1]))
                 for i in range(len(images))
             ]
             outputs_global = [None for i in range(len(images))]
@@ -397,9 +391,7 @@ class Trainer(object):
             for i in range(len(images)):
                 j = 0
                 while j < len(coordinates[i]):
-                    patches_var = images_transform(
-                        patches[i][j : j + self.sub_batch_size]
-                    )  # b, c, h, w
+                    patches_var = images_transform(patches[i][j : j + self.sub_batch_size])  # b, c, h, w
                     label_patches_var = masks_transform(
                         resize(
                             label_patches[i][j : j + self.sub_batch_size],
@@ -430,16 +422,10 @@ class Trainer(object):
 
                     # patch predictions
                     predicted_patches[i][j : j + output_patches.size()[0]] = (
-                        F.interpolate(output_patches, size=self.size_p, mode="nearest")
-                        .data.cpu()
-                        .numpy()
+                        F.interpolate(output_patches, size=self.size_p, mode="nearest").data.cpu().numpy()
                     )
                     predicted_ensembles[i][j : j + output_ensembles.size()[0]] = (
-                        F.interpolate(
-                            output_ensembles, size=self.size_p, mode="nearest"
-                        )
-                        .data.cpu()
-                        .numpy()
+                        F.interpolate(output_ensembles, size=self.size_p, mode="nearest").data.cpu().numpy()
                     )
                     j += self.sub_batch_size
                 outputs_global[i] = output_global
@@ -456,9 +442,7 @@ class Trainer(object):
             for i in range(len(images)):
                 j = 0
                 while j < len(coordinates[i]):
-                    patches_var = images_transform(
-                        patches[i][j : j + self.sub_batch_size]
-                    )  # b, c, h, w
+                    patches_var = images_transform(patches[i][j : j + self.sub_batch_size])  # b, c, h, w
                     fm_patches, output_patches = model.collect_local_fm(
                         images_glb[i : i + 1],
                         patches_var,
@@ -471,15 +455,11 @@ class Trainer(object):
                         n_patch_all=len(coordinates[i]),
                     )
                     predicted_patches[i][j : j + output_patches.size()[0]] = (
-                        F.interpolate(output_patches, size=self.size_p, mode="nearest")
-                        .data.cpu()
-                        .numpy()
+                        F.interpolate(output_patches, size=self.size_p, mode="nearest").data.cpu().numpy()
                     )
                     j += self.sub_batch_size
             # train on global image
-            outputs_global, fm_global = model.forward(
-                images_glb, None, None, None, mode=self.mode
-            )
+            outputs_global, fm_global = model.forward(images_glb, None, None, None, mode=self.mode)
             loss = self.criterion(outputs_global, labels_glb)
             loss.backward(retain_graph=True)
             # fmreg loss
@@ -502,23 +482,15 @@ class Trainer(object):
                     )[0]
                     fg = F.interpolate(fg, size=fl.size()[2:], mode="bilinear")
                     output_ensembles = model.ensemble(fl, fg)
-                    loss = self.criterion(
-                        output_ensembles, label_patches_var
-                    )  # + 0.15 * mse(fl, fg)
-                    if i == len(images) - 1 and j + self.sub_batch_size >= len(
-                        coordinates[i]
-                    ):
+                    loss = self.criterion(output_ensembles, label_patches_var)  # + 0.15 * mse(fl, fg)
+                    if i == len(images) - 1 and j + self.sub_batch_size >= len(coordinates[i]):
                         loss.backward()
                     else:
                         loss.backward(retain_graph=True)
 
                     # ensemble predictions
                     predicted_ensembles[i][j : j + output_ensembles.size()[0]] = (
-                        F.interpolate(
-                            output_ensembles, size=self.size_p, mode="nearest"
-                        )
-                        .data.cpu()
-                        .numpy()
+                        F.interpolate(output_ensembles, size=self.size_p, mode="nearest").data.cpu().numpy()
                     )
                     j += self.sub_batch_size
             self.optimizer.step()
@@ -527,12 +499,7 @@ class Trainer(object):
         # global predictions ###########################
         outputs_global = outputs_global.cpu()
         predictions_global = [
-            F.interpolate(
-                outputs_global[i : i + 1], images[i].size[::-1], mode="nearest"
-            )
-            .argmax(1)
-            .detach()
-            .numpy()
+            F.interpolate(outputs_global[i : i + 1], images[i].size[::-1], mode="nearest").argmax(1).detach().numpy()
             for i in range(len(images))
         ]
         self.metrics_global.update(labels_npy, predictions_global)
@@ -540,18 +507,14 @@ class Trainer(object):
         if self.mode == 2 or self.mode == 3:
             # patch predictions ###########################
             scores_local = np.array(
-                patch2global(
-                    predicted_patches, self.n_class, sizes, coordinates, self.size_p
-                )
+                patch2global(predicted_patches, self.n_class, sizes, coordinates, self.size_p)
             )  # merge softmax scores from patches (overlaps)
             predictions_local = scores_local.argmax(1)  # b, h, w
             self.metrics_local.update(labels_npy, predictions_local)
             ###################################################
             # combined/ensemble predictions ###########################
             scores = np.array(
-                patch2global(
-                    predicted_ensembles, self.n_class, sizes, coordinates, self.size_p
-                )
+                patch2global(predicted_ensembles, self.n_class, sizes, coordinates, self.size_p)
             )  # merge softmax scores from patches (overlaps)
             predictions = scores.argmax(1)  # b, h, w
             self.metrics.update(labels_npy, predictions)
@@ -596,53 +559,38 @@ class Evaluator(object):
                 labels_npy = masks_transform(labels, numpy=True)
 
             images_global = resize(images, self.size_g)
-            outputs_global = np.zeros(
-                (len(images), self.n_class, self.size_g[0] // 4, self.size_g[1] // 4)
-            )
+            outputs_global = np.zeros((len(images), self.n_class, self.size_g[0] // 4, self.size_g[1] // 4))
             if self.mode == 2 or self.mode == 3:
                 images_local = [image.copy() for image in images]
                 scores_local = [
-                    np.zeros((1, self.n_class, images[i].size[1], images[i].size[0]))
-                    for i in range(len(images))
+                    np.zeros((1, self.n_class, images[i].size[1], images[i].size[0])) for i in range(len(images))
                 ]
                 scores = [
-                    np.zeros((1, self.n_class, images[i].size[1], images[i].size[0]))
-                    for i in range(len(images))
+                    np.zeros((1, self.n_class, images[i].size[1], images[i].size[0])) for i in range(len(images))
                 ]
 
             for flip in self.flip_range:
                 if flip:
                     # we already rotated images for 270'
                     for b in range(len(images)):
-                        images_global[b] = transforms.functional.rotate(
-                            images_global[b], 90
-                        )  # rotate back!
+                        images_global[b] = transforms.functional.rotate(images_global[b], 90)  # rotate back!
                         images_global[b] = transforms.functional.hflip(images_global[b])
                         if self.mode == 2 or self.mode == 3:
-                            images_local[b] = transforms.functional.rotate(
-                                images_local[b], 90
-                            )  # rotate back!
-                            images_local[b] = transforms.functional.hflip(
-                                images_local[b]
-                            )
+                            images_local[b] = transforms.functional.rotate(images_local[b], 90)  # rotate back!
+                            images_local[b] = transforms.functional.hflip(images_local[b])
+
                 for angle in self.rotate_range:
                     if angle > 0:
                         for b in range(len(images)):
-                            images_global[b] = transforms.functional.rotate(
-                                images_global[b], 90
-                            )
+                            images_global[b] = transforms.functional.rotate(images_global[b], 90)
                             if self.mode == 2 or self.mode == 3:
-                                images_local[b] = transforms.functional.rotate(
-                                    images_local[b], 90
-                                )
+                                images_local[b] = transforms.functional.rotate(images_local[b], 90)
 
-                    # prepare global images onto cuda
-                    images_glb = images_transform(images_global)  # b, c, h, w
-
+                    # tensor of shape (b, c, h, w)
+                    images_glb = images_transform(images_global)
+                    # setup patches 
                     if self.mode == 2 or self.mode == 3:
-                        patches, coordinates, templates, sizes, ratios = global2patch(
-                            images, self.size_p
-                        )
+                        patches, coordinates, templates, sizes, ratios = global2patch(images, self.size_p)
                         predicted_patches = [
                             np.zeros(
                                 (
@@ -671,9 +619,7 @@ class Evaluator(object):
                         if flip:
                             outputs_global += np.flip(
                                 np.rot90(
-                                    model.forward(images_glb, None, None, None)[0]
-                                    .data.cpu()
-                                    .numpy(),
+                                    model.forward(images_glb, None, None, None)[0].data.cpu().numpy(),
                                     k=angle,
                                     axes=(3, 2),
                                 ),
@@ -681,9 +627,7 @@ class Evaluator(object):
                             )
                         else:
                             outputs_global += np.rot90(
-                                model.forward(images_glb, None, None, None)[0]
-                                .data.cpu()
-                                .numpy(),
+                                model.forward(images_glb, None, None, None)[0].data.cpu().numpy(),
                                 k=angle,
                                 axes=(3, 2),
                             )
@@ -694,9 +638,7 @@ class Evaluator(object):
                         for i in range(len(images)):
                             j = 0
                             while j < len(coordinates[i]):
-                                patches_var = images_transform(
-                                    patches[i][j : j + self.sub_batch_size]
-                                )  # b, c, h, w
+                                patches_var = images_transform(patches[i][j : j + self.sub_batch_size])  # b, c, h, w
                                 (
                                     output_ensembles,
                                     output_global,
@@ -712,18 +654,10 @@ class Evaluator(object):
                                 )
 
                                 # patch predictions
-                                predicted_patches[i][
-                                    j : j + output_patches.size()[0]
-                                ] += (
-                                    F.interpolate(
-                                        output_patches, size=self.size_p, mode="nearest"
-                                    )
-                                    .data.cpu()
-                                    .numpy()
+                                predicted_patches[i][j : j + output_patches.size()[0]] += (
+                                    F.interpolate(output_patches, size=self.size_p, mode="nearest").data.cpu().numpy()
                                 )
-                                predicted_ensembles[i][
-                                    j : j + output_ensembles.size()[0]
-                                ] += (
+                                predicted_ensembles[i][j : j + output_ensembles.size()[0]] += (
                                     F.interpolate(
                                         output_ensembles,
                                         size=self.size_p,
@@ -809,18 +743,18 @@ class Evaluator(object):
                         ###############################################################
 
                     if self.mode == 3:
-                        # eval global with help from patches ##################################################
+                        # eval global with help from patches 
                         # go through local patches to collect feature maps
                         # collect predictions from patches
                         for i in range(len(images)):
                             j = 0
                             while j < len(coordinates[i]):
-                                patches_var = images_transform(
-                                    patches[i][j : j + self.sub_batch_size]
-                                )  # b, c, h, w
+                                # transform patches to tensor of shape (sub_batchsize, c, patch_h, patch_w)
+                                patches_var = images_transform(patches[i][j : j + self.sub_batch_size])
                                 (
                                     fm_patches,
                                     output_patches,
+                                # TODO: look into what collect_local_fm does
                                 ) = model.collect_local_fm(
                                     images_glb[i : i + 1],
                                     patches_var,
@@ -832,29 +766,19 @@ class Evaluator(object):
                                     template=templates[i],
                                     n_patch_all=len(coordinates[i]),
                                 )
-                                predicted_patches[i][
-                                    j : j + output_patches.size()[0]
-                                ] += (
-                                    F.interpolate(
-                                        output_patches, size=self.size_p, mode="nearest"
-                                    )
-                                    .data.cpu()
-                                    .numpy()
+                                predicted_patches[i][j : j + output_patches.size()[0]] += (
+                                    F.interpolate(output_patches, size=self.size_p, mode="nearest").data.cpu().numpy()
                                 )
                                 j += self.sub_batch_size
                         # go through global image
-                        tmp, fm_global = model.forward(
-                            images_glb, None, None, None, mode=self.mode
-                        )
+                        tmp, fm_global = model.forward(images_glb, None, None, None, mode=self.mode)
                         if flip:
                             outputs_global += np.flip(
                                 np.rot90(tmp.data.cpu().numpy(), k=angle, axes=(3, 2)),
                                 axis=3,
                             )
                         else:
-                            outputs_global += np.rot90(
-                                tmp.data.cpu().numpy(), k=angle, axes=(3, 2)
-                            )
+                            outputs_global += np.rot90(tmp.data.cpu().numpy(), k=angle, axes=(3, 2))
                         # generate ensembles
                         for i in range(len(images)):
                             j = 0
@@ -865,17 +789,11 @@ class Evaluator(object):
                                     coordinates[i][j : j + self.sub_batch_size],
                                     ratios[i],
                                 )[0]
-                                fg = F.interpolate(
-                                    fg, size=fl.size()[2:], mode="bilinear"
-                                )
-                                output_ensembles = model.ensemble(
-                                    fl, fg
-                                )  # include cordinates
+                                fg = F.interpolate(fg, size=fl.size()[2:], mode="bilinear")
+                                output_ensembles = model.ensemble(fl, fg)  # include cordinates
 
                                 # ensemble predictions
-                                predicted_ensembles[i][
-                                    j : j + output_ensembles.size()[0]
-                                ] += (
+                                predicted_ensembles[i][j : j + output_ensembles.size()[0]] += (
                                     F.interpolate(
                                         output_ensembles,
                                         size=self.size_p,
@@ -954,9 +872,7 @@ class Evaluator(object):
             # global predictions ###########################
             outputs_global = torch.Tensor(outputs_global)
             predictions_global = [
-                F.interpolate(
-                    outputs_global[i : i + 1], images[i].size[::-1], mode="nearest"
-                )
+                F.interpolate(outputs_global[i : i + 1], images[i].size[::-1], mode="nearest")
                 .argmax(1)
                 .detach()
                 .numpy()[0]
